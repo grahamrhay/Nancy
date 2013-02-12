@@ -5,6 +5,7 @@
     using System.Globalization;
     using System.Net;
     using System.Linq;
+    using System.Security.Principal;
     using IO;
     using Nancy.Bootstrapper;
     using Nancy.Extensions;
@@ -24,7 +25,7 @@
     public class NancyHost  
     {
         private readonly IList<Uri> baseUriList;
-        private readonly HttpListener listener;
+        private HttpListener listener;
         private readonly INancyEngine engine;
         private readonly HostConfiguration configuration;
 
@@ -69,7 +70,6 @@
         {
             this.configuration = configuration ?? new HostConfiguration();
             this.baseUriList = baseUris;
-            this.listener = new HttpListener();
 
             bootstrapper.Initialise();
             this.engine = bootstrapper.GetEngine();
@@ -105,9 +105,8 @@
         /// </summary>
         public void Start()
         {
-            this.AddPrefixes();
+            this.StartListener();
 
-            listener.Start();
             try
             {
                 listener.BeginGetContext(GotCallback, null);
@@ -120,6 +119,59 @@
             }
         }
 
+        private void StartListener()
+        {
+            if (TryStartListener())
+                return;
+
+            if (!TryAddNamespaceReservation())
+            {
+                throw new InvalidOperationException("Unable to configure namespace reservation");
+            }
+
+            if (!TryStartListener())
+            {
+                throw new InvalidOperationException("Unable to start listener");
+            }
+        }
+
+        private bool TryStartListener()
+        {
+            try
+            {
+                // if the listener fails to start, it gets disposed; 
+                // so we need a new one, each time.
+                listener = new HttpListener();
+                foreach (var prefix in GetPrefixes())
+                {
+                    listener.Prefixes.Add(prefix);
+                }
+
+                listener.Start();
+                return true;
+            }
+            catch (HttpListenerException e)
+            {
+                if (e.ErrorCode == 5) // access denied
+                    return false;
+
+                throw;
+            }
+        }
+
+        private bool TryAddNamespaceReservation()
+        {
+            var user = WindowsIdentity.GetCurrent().Name;
+
+            foreach (var prefix in GetPrefixes())
+            {
+                if (!NetSh.AddUrlAcl(prefix, user))
+                    return false;
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Stop listening for incoming requests.
         /// </summary>
@@ -128,7 +180,7 @@
             listener.Stop();
         }
 
-        private void AddPrefixes()
+        private IEnumerable<string> GetPrefixes()
         {
             foreach (var baseUri in baseUriList)
             {
@@ -139,7 +191,7 @@
                     prefix = prefix.Replace("localhost", "+");
                 }
 
-                listener.Prefixes.Add(prefix);
+                yield return prefix;
             }
         }
 
