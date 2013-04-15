@@ -9,6 +9,9 @@ namespace Nancy.Diagnostics
     using Cryptography;
     using Helpers;
     using ModelBinding;
+
+    using Nancy.Routing.Trie;
+
     using Responses;
     using Responses.Negotiation;
     using Routing;
@@ -22,17 +25,15 @@ namespace Nancy.Diagnostics
 
         public static void Enable(DiagnosticsConfiguration diagnosticsConfiguration, IPipelines pipelines, IEnumerable<IDiagnosticsProvider> providers, IRootPathProvider rootPathProvider, IEnumerable<ISerializer> serializers, IRequestTracing requestTracing, NancyInternalConfiguration configuration, IModelBinderLocator modelBinderLocator, IEnumerable<IResponseProcessor> responseProcessors, ICultureService cultureService)
         {
-            var keyGenerator = new DefaultModuleKeyGenerator();
-            var diagnosticsModuleCatalog = new DiagnosticsModuleCatalog(keyGenerator, providers, rootPathProvider, requestTracing, configuration, diagnosticsConfiguration);
+            var diagnosticsModuleCatalog = new DiagnosticsModuleCatalog(providers, rootPathProvider, requestTracing, configuration, diagnosticsConfiguration);
 
-            var diagnosticsRouteCache = new RouteCache(diagnosticsModuleCatalog, keyGenerator, new DefaultNancyContextFactory(cultureService), new DefaultRouteSegmentExtractor(), new DefaultRouteDescriptionProvider(), cultureService);
+            var diagnosticsRouteCache = new RouteCache(diagnosticsModuleCatalog, new DefaultNancyContextFactory(cultureService), new DefaultRouteSegmentExtractor(), new DefaultRouteDescriptionProvider(), cultureService);
 
             var diagnosticsRouteResolver = new DefaultRouteResolver(
                 diagnosticsModuleCatalog,
-                new DefaultRoutePatternMatcher(),
                 new DiagnosticsModuleBuilder(rootPathProvider, serializers, modelBinderLocator),
                 diagnosticsRouteCache,
-                responseProcessors);
+                new RouteResolverTrie(new TrieNodeFactory()));
 
             var serializer = new DefaultObjectSerializer();
 
@@ -63,7 +64,7 @@ namespace Nancy.Diagnostics
                             var path = Path.GetDirectoryName(ctx.Request.Url.Path.Replace(resourcePrefix, string.Empty)) ?? string.Empty;
                             if (!string.IsNullOrEmpty(path))
                             {
-                                resourceNamespace += string.Format(".{0}", path.Replace('\\', '.'));
+                                resourceNamespace += string.Format(".{0}", path.Replace(Path.DirectorySeparatorChar, '.'));
                             }
 
                             return new EmbeddedFileResponse(
@@ -117,14 +118,12 @@ namespace Nancy.Diagnostics
 
             var resolveResult = routeResolver.Resolve(ctx);
 
-            ctx.Parameters = resolveResult.Item2;
-            var resolveResultPreReq = resolveResult.Item3;
-            var resolveResultPostReq = resolveResult.Item4;
-            ExecuteRoutePreReq(ctx, resolveResultPreReq);
+            ctx.Parameters = resolveResult.Parameters;
+            ExecuteRoutePreReq(ctx, resolveResult.Before);
 
             if (ctx.Response == null)
             {
-                ctx.Response = resolveResult.Item1.Invoke(resolveResult.Item2);
+                ctx.Response = resolveResult.Route.Invoke(resolveResult.Parameters);
             }
 
             if (ctx.Request.Method.ToUpperInvariant() == "HEAD")
@@ -132,9 +131,9 @@ namespace Nancy.Diagnostics
                 ctx.Response = new HeadResponse(ctx.Response);
             }
 
-            if (resolveResultPostReq != null)
+            if (resolveResult.After != null)
             {
-                resolveResultPostReq.Invoke(ctx);
+                resolveResult.After.Invoke(ctx);
             }
 
             AddUpdateSessionCookie(session, ctx, diagnosticsConfiguration, serializer);
@@ -234,7 +233,8 @@ namespace Nancy.Diagnostics
         private static bool IsLoginRequest(NancyContext context, DiagnosticsConfiguration diagnosticsConfiguration)
         {
             return context.Request.Method == "POST" &&
-                context.Request.Url.BasePath.TrimEnd(new[] { '/' }).EndsWith(diagnosticsConfiguration.Path);
+                context.Request.Url.BasePath.TrimEnd(new[] { '/' }).EndsWith(diagnosticsConfiguration.Path) &&
+                context.Request.Url.Path == "/";
         }
 
         private static void ExecuteRoutePreReq(NancyContext context, Func<NancyContext, Response> resolveResultPreReq)

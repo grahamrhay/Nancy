@@ -2,14 +2,14 @@
 {
     using System;
     using System.Collections.Generic;
-    using System.Diagnostics;
     using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.ServiceModel;
     using System.ServiceModel.Channels;
     using System.ServiceModel.Web;
-    using System.Xml;
+    using System.IdentityModel.Claims;
+    
     using IO;
     using Nancy.Bootstrapper;
     using Nancy.Extensions;
@@ -52,7 +52,7 @@
             var webContext = WebOperationContext.Current;
             
             var nancyRequest = 
-                CreateNancyRequestFromIncomingWebRequest(webContext.IncomingRequest, requestBody);
+                CreateNancyRequestFromIncomingWebRequest(webContext.IncomingRequest, requestBody, OperationContext.Current);
 
             var nancyContext = 
                 engine.HandleRequest(nancyRequest);
@@ -64,16 +64,26 @@
                     {
                         nancyContext.Response.Contents(stream);
                         nancyContext.Dispose();
-                    }, nancyContext.Response.ContentType);
+                    }, 
+                    nancyContext.Response.ContentType ?? "none/none"); // Stupid WCF forces us to specify a content type
         }
 
-        private static Request CreateNancyRequestFromIncomingWebRequest(IncomingWebRequestContext webRequest, Stream requestBody)
+        private static Request CreateNancyRequestFromIncomingWebRequest(IncomingWebRequestContext webRequest, Stream requestBody, OperationContext context)
         {
             var address =
                 ((RemoteEndpointMessageProperty)
                  OperationContext.Current.IncomingMessageProperties[RemoteEndpointMessageProperty.Name]);
 
-            var relativeUri = GetUrlAndPathComponents(webRequest.UriTemplateMatch.BaseUri).MakeRelativeUri(GetUrlAndPathComponents(webRequest.UriTemplateMatch.RequestUri));
+            var baseUri =
+                GetUrlAndPathComponents(webRequest.UriTemplateMatch.BaseUri);
+
+            if(!baseUri.OriginalString.EndsWith("/"))
+            {
+                baseUri = new Uri(string.Concat(baseUri.OriginalString, "/"));
+            }
+
+            var relativeUri =
+                baseUri.MakeRelativeUri(GetUrlAndPathComponents(webRequest.UriTemplateMatch.RequestUri));
 
             var expectedRequestLength =
                 GetExpectedRequestLength(webRequest.Headers.ToDictionary());
@@ -87,12 +97,27 @@
                 Query = webRequest.UriTemplateMatch.RequestUri.Query
             };
 
+            byte[] certificate = null;
+
+            if (context.ServiceSecurityContext != null && context.ServiceSecurityContext.AuthorizationContext.ClaimSets.Count > 0)
+            {
+                var claimset =
+                    context.ServiceSecurityContext.AuthorizationContext.ClaimSets.FirstOrDefault(
+                        c => c is X509CertificateClaimSet) as X509CertificateClaimSet;
+
+                if (claimset != null)
+                {
+                    certificate = claimset.X509Certificate.RawData;
+                }
+            }
+
             return new Request(
                 webRequest.Method,
                 nancyUrl,
                 RequestStream.FromStream(requestBody, expectedRequestLength, false),
                 webRequest.Headers.ToDictionary(),
-                address.Address);
+                address.Address, 
+                certificate);
         }
 
         private static long GetExpectedRequestLength(IDictionary<string, IEnumerable<string>> incomingHeaders)
@@ -133,7 +158,10 @@
         {
             SetHttpResponseHeaders(webResponse, nancyResponse);
 
-            webResponse.ContentType = nancyResponse.ContentType;
+            if (nancyResponse.ContentType != null)
+            {
+                webResponse.ContentType = nancyResponse.ContentType;
+            }
             webResponse.StatusCode = (System.Net.HttpStatusCode)nancyResponse.StatusCode;
         }
 

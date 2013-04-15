@@ -2,6 +2,8 @@
 {
     using System;
     using System.IO;
+    using System.Threading.Tasks;
+    using Nancy.Extensions;
 
     /// <summary>
     /// A <see cref="Stream"/> decorator that can handle moving the stream out from memory and on to disk when the contents reaches a certain length.
@@ -62,11 +64,47 @@
 
             ThrowExceptionIfCtorParametersWereInvalid(this.stream, expectedLength, this.thresholdLength);
 
-            this.EnsureStreamIsSeekable();
-            this.MoveStreamOutOfMemoryIfExpectedLengthExceedExpectedLength(expectedLength);
-            this.MoveStreamOutOfMemoryIfContentsLengthExceedThresholdAndSwitchingIsEnabled();
+            if (!this.MoveStreamOutOfMemoryIfExpectedLengthExceedSwitchLength(expectedLength))
+            {
+                this.MoveStreamOutOfMemoryIfContentsLengthExceedThresholdAndSwitchingIsEnabled();
+            }
+
+            if (!this.stream.CanSeek)
+            {
+                var task =
+                    MoveToWritableStream();
+ 
+                task.Wait();
+  
+                if (task.IsFaulted)
+                {
+                   throw new InvalidOperationException("Unable to copy stream", task.Exception);
+                }
+            }
 
             this.stream.Position = 0;
+        }
+
+        private Task<object> MoveToWritableStream()
+        {
+            var tcs = new TaskCompletionSource<object>();
+
+            var sourceStream = this.stream;
+            this.stream = new MemoryStream(StreamExtensions.BufferSize);
+
+            sourceStream.CopyTo(this, (source, destination, ex) =>
+            {
+                if (ex != null)
+                {
+                    tcs.SetException(ex);
+                }
+                else
+                {
+                    tcs.SetResult(null);
+                }
+            });
+
+            return tcs.Task;
         }
 
         /// <summary>
@@ -206,6 +244,8 @@
         public override void EndWrite(IAsyncResult asyncResult)
         {
             this.stream.EndWrite(asyncResult);
+
+            this.ShiftStreamToFileStreamIfNecessary();
         }
 
         /// <summary>
@@ -239,7 +279,7 @@
         public static RequestStream FromStream(Stream stream, long expectedLength, long thresholdLength, bool disableStreamSwitching)
         {
             return new RequestStream(stream, expectedLength, thresholdLength, disableStreamSwitching);
-        }        
+        }
 
         /// <summary>
         /// Reads a sequence of bytes from the current stream and advances the position within the stream by the number of bytes read.
@@ -294,6 +334,11 @@
         {
             this.stream.Write(buffer, offset, count);
 
+            this.ShiftStreamToFileStreamIfNecessary();
+        }
+
+        private void ShiftStreamToFileStreamIfNecessary()
+        {
             if (this.disableStreamSwitching)
             {
                 return;
@@ -306,7 +351,7 @@
                 // in NancyWcfGenericService - webRequest.UriTemplateMatch
                 var old = this.stream;
                 this.MoveStreamContentsToFileStream();
-                old.Close();                
+                old.Close();
             }
         }
 
@@ -347,53 +392,38 @@
             }
         }
 
-        private void EnsureStreamIsSeekable()
-        {
-            if (!this.stream.CanSeek)
-            {
-                this.MoveStreamContentsToMemoryStream();
-            }
-        }
-
         private void MoveStreamOutOfMemoryIfContentsLengthExceedThresholdAndSwitchingIsEnabled()
         {
-            if ((this.stream.Length > this.thresholdLength) && !this.disableStreamSwitching)
-            {
-                this.MoveStreamContentsToFileStream();
-            }
-        }
-
-        private void MoveStreamOutOfMemoryIfExpectedLengthExceedExpectedLength(long expectedLength)
-        {
-            if (expectedLength >= this.thresholdLength)
-            {
-                this.MoveStreamContentsToFileStream();
-            }
-        }
-
-        private void MoveStreamContentsToFileStream()
-        {            
-            MoveStreamContentsInto(CreateTemporaryFileStream);
-        }        
-
-        private void MoveStreamContentsToMemoryStream()
-        {
-            MoveStreamContentsInto(() => new MemoryStream());
-        }
-
-        private bool IsStreamSeekableAndSwitchingDisabled()
-        {
-            return this.disableStreamSwitching && this.stream.CanSeek;
-        }
-
-        private void MoveStreamContentsInto(Func<Stream> target)
-        {
-            if (IsStreamSeekableAndSwitchingDisabled())
+            if (!this.stream.CanSeek)
             {
                 return;
             }
 
-            var targetStream = target.Invoke();
+            try
+            {
+                if ((this.stream.Length > this.thresholdLength) && !this.disableStreamSwitching)
+                {
+                    this.MoveStreamContentsToFileStream();
+                }
+            }
+            catch (NotSupportedException)
+            {
+            }
+        }
+
+        private bool MoveStreamOutOfMemoryIfExpectedLengthExceedSwitchLength(long expectedLength)
+        {
+            if (expectedLength >= this.thresholdLength)
+            {
+                this.MoveStreamContentsToFileStream();
+                return true;
+            }
+            return false;
+        }
+
+        private void MoveStreamContentsToFileStream()
+        {
+            var targetStream = CreateTemporaryFileStream();
             this.isSafeToDisposeStream = true;
 
             if (this.stream.CanSeek && this.stream.Length == 0)
@@ -403,14 +433,16 @@
                 return;
             }
 
+            this.stream.Position = 0;
             this.stream.CopyTo(targetStream, 8196);
-            if (this.stream.CanSeek) 
+            if (this.stream.CanSeek)
             {
                 this.stream.Flush();
             }
-            
-            targetStream.Position = 0;
+
             this.stream = targetStream;
+
+            this.disableStreamSwitching = true;
         }
 
         private static void ThrowExceptionIfCtorParametersWereInvalid(Stream stream, long expectedLength, long thresholdLength)

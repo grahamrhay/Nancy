@@ -4,13 +4,17 @@
     using System.Dynamic;
     using System.IO;
     using System.Linq;
+    using System.Reflection;
     using System.Text;
+    using System.Threading;
+
     using FakeItEasy;
-    using Xunit;
+
+    using Nancy.Bootstrapper;
     using Nancy.Tests;
     using Nancy.ViewEngines.Razor.Tests.Models;
-    using System.Threading;
-    using Nancy.Localization;
+
+    using Xunit;
 
     public class RazorViewEngineFixture
     {
@@ -47,6 +51,8 @@
             A.CallTo(() => this.rootPathProvider.GetRootPath()).Returns(Path.Combine(Environment.CurrentDirectory, "TestViews"));
 
             this.fileSystemViewLocationProvider = new FileSystemViewLocationProvider(this.rootPathProvider, new DefaultFileSystemReader());
+
+            AppDomainAssemblyTypeScanner.AddAssembliesToScan("Nancy.ViewEngines.Razor.Tests.Models.dll");
         }
 
         [Fact]
@@ -213,6 +219,12 @@
         public void RenderView_csharp_should_be_able_to_find_the_model_when_a_null_model_is_passed()
         {
             // Given
+            AppDomainAssemblyTypeScanner.AssembliesToScan =
+                AppDomainAssemblyTypeScanner.DefaultAssembliesToScan.Union(new Func<Assembly, bool>[]
+                                                                               {
+                                                                                   x =>
+                                                                                   x.GetName().Name.StartsWith("Nancy")
+                                                                               });
             var view = new StringBuilder()
                 .AppendLine("@model Nancy.ViewEngines.Razor.Tests.Models.Person")
                 .AppendLine(@"@{ var hobby = new Hobby { Name = ""Music"" }; }")
@@ -420,6 +432,23 @@
         }
 
         [Fact]
+        public void Should_be_able_to_render_view_with_helper_to_steam()
+        {
+            // Given
+            var location = FindView("ViewThatUsesHelper");
+
+            var stream = new MemoryStream();
+
+            // When
+            var response = this.engine.RenderView(location, null, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            // Then
+            var output = ReadAll(stream);
+            output.ShouldContainInOrder("<h1>SimplyLayout</h1>", "<div>ViewThatUsesHelper</div>", "<p class=\"className\"></p>");
+        }
+
+        [Fact]
         public void Should_use_custom_view_base_with_csharp_views()
         {
             // Given
@@ -462,7 +491,7 @@
                 "vbhtml",
                 () => new StringReader(view.ToString())
             );
-#endif
+
             var stream = new MemoryStream();
 
             A.CallTo(() => this.configuration.GetAssemblyNames()).Returns(new[] { "Nancy.ViewEngines.Razor.Tests" });
@@ -475,7 +504,7 @@
             var output = ReadAll(stream).Trim();
             output.ShouldEqual("<h1>Hi, Nancy!</h1>");
         }
-
+#endif
         [Fact(Skip = "Multi-threading regression test")]
         public void should_work_on_multiple_threads()
         {
@@ -523,6 +552,37 @@
             //Then
             var output = ReadAll(stream);
             output.ShouldContain("<a href=\"BobSlug\">Bob</a>");
+        }
+
+        [Fact]
+        public void Should_render_attributes_with_dynamic_null_inside()
+        {
+            var location = FindView("ViewThatUsesAttributeWithDynamicNullInside");
+            var stream = new MemoryStream();
+
+            //When
+            var response = this.engine.RenderView(location, null, this.renderContext);
+            response.Contents.Invoke(stream);
+
+            //Then
+            var output = ReadAll(stream);
+            output.ShouldContain("<input value=\"\" />");
+        }
+
+        [Fact]
+        public void Should_render_attributes_with_NonEncodedHtmlString_inside()
+        {
+            var location = FindView("ViewThatUsesAttributeWithNonEncodedHtmlStringInside");
+            var stream = new MemoryStream();
+            const string PHRASE = "Slugs are secret spies on gardeners, but no ones who they spy for";
+
+            //When
+            var response = this.engine.RenderView(location, new NonEncodedHtmlString(PHRASE), this.renderContext);
+            response.Contents.Invoke(stream);
+
+            //Then
+            var output = ReadAll(stream);
+            output.ShouldContain(string.Format("<input value=\"{0}\" />", PHRASE));
         }
 
         private static string ReadAll(Stream stream)

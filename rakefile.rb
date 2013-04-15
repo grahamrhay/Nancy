@@ -47,7 +47,7 @@ end
 
 desc "Compile solution file"
 msbuild :compile => [:assembly_info] do |msb|
-    msb.properties :configuration => CONFIGURATION
+    msb.properties = { :configuration => CONFIGURATION, "VisualStudioVersion" => "10.0" }
     msb.targets :Clean, :Build
     msb.solution = SOLUTION_FILE
 end
@@ -61,14 +61,13 @@ end
 
 desc "Gathers output files and copies them to the output folder"
 task :publish => [:compile] do
-    if not File.directory? OUTPUT
-        Dir.mkdir(OUTPUT)
-    end
-    if not File.directory? "#{OUTPUT}/binaries"
-        Dir.mkdir("#{OUTPUT}/binaries")
+
+    output = "#{OUTPUT}/binaries"
+    if not File.directory? output
+        mkpath(output)
     end
 
-    FileUtils.cp_r FileList["src/**/#{CONFIGURATION}/*.dll", "src/**/#{CONFIGURATION}/*.pdb", "src/**/*.ps1"].exclude(/obj\//).exclude(/.Tests/), "#{OUTPUT}/binaries"
+    FileUtils.cp_r FileList["src/**/#{CONFIGURATION}/*.dll", "src/**/#{CONFIGURATION}/*.pdb", "src/**/*.ps1"].exclude(/obj\//).exclude(/.Tests/), output
 end
 
 desc "Executes MSpec tests"
@@ -136,7 +135,7 @@ task :nuget_package => [:publish] do
 			
 			# Override the Nancy dependencies to match this version
             nancy_dependencies = xml.root.elements["metadata/dependencies/dependency[contains(@id,'Nancy')]"]
-            nancy_dependencies.attributes["version"] = "[#{$nancy_version}]" unless nancy_dependencies.nil?
+            nancy_dependencies.attributes["version"] = "#{$nancy_version}" unless nancy_dependencies.nil?
 
             # Override common values
             xml.root.elements["metadata/authors"].text = "Andreas Håkansson, Steven Robbins and contributors"
@@ -166,6 +165,22 @@ task :nuget_publish, :api_key do |task, args|
 	nuget_push.apikey = args.api_key if !args.empty?
         nuget_push.command = "tools/nuget/nuget.exe"
         nuget_push.package = "\"" + nupkg + "\""
+        nuget_push.create_only = false
+        nuget_push.execute
+    end
+end
+
+desc "Pushes the nuget packages in the nuget folder up to the specified feed"
+task :nuget_publish_alt, :api_key, :source do |task, args|
+    raise "Missing source" if args.source.nil?
+    nupkgs = FileList["#{OUTPUT}/nuget/*#{$nancy_version}.nupkg"]
+    nupkgs.each do |nupkg| 
+        puts "Pushing #{nupkg} to {#args.source}"
+        nuget_push = NuGetPush.new
+        nuget_push.apikey = args.api_key if !args.empty?
+        nuget_push.command = "tools/nuget/nuget.exe"
+        nuget_push.package = "\"" + nupkg + "\""
+        nuget_push.source = args.source
         nuget_push.create_only = false
         nuget_push.execute
     end

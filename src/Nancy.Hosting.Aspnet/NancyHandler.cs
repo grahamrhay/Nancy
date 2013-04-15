@@ -39,8 +39,10 @@ namespace Nancy.Hosting.Aspnet
 
         private static Request CreateNancyRequest(HttpContextBase context)
         {
+            var incomingHeaders = context.Request.Headers.ToDictionary();
+
             var expectedRequestLength =
-                GetExpectedRequestLength(context.Request.Headers.ToDictionary());
+                GetExpectedRequestLength(incomingHeaders);
 
             var basePath = context.Request.ApplicationPath.TrimEnd('/');
 
@@ -57,13 +59,20 @@ namespace Nancy.Hosting.Aspnet
                                    Query = context.Request.Url.Query,
                                    Fragment = context.Request.Url.Fragment,
                                };
+            byte[] certificate = null;
 
+            if (context.Request.ClientCertificate != null && context.Request.ClientCertificate.Certificate.Length != 0)
+            {
+                certificate = context.Request.ClientCertificate.Certificate;
+            }
+                
             return new Request(
                 context.Request.HttpMethod.ToUpperInvariant(),
                 nancyUrl,
                 RequestStream.FromStream(context.Request.InputStream, expectedRequestLength, true),
-                context.Request.Headers.ToDictionary(),
-                context.Request.UserHostAddress);
+                incomingHeaders,
+                context.Request.UserHostAddress,
+                certificate);
         }
 
         private static long GetExpectedRequestLength(IDictionary<string, IEnumerable<string>> incomingHeaders)
@@ -99,7 +108,10 @@ namespace Nancy.Hosting.Aspnet
         {
             SetHttpResponseHeaders(context, response);
 
-            context.Response.ContentType = response.ContentType;
+            if (response.ContentType != null)
+            {
+                context.Response.ContentType = response.ContentType;
+            }
             context.Response.StatusCode = (int)response.StatusCode;
             response.Contents.Invoke(context.Response.OutputStream);         
         }

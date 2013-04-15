@@ -101,13 +101,13 @@
     </Reference>
     <Reference Include="System.Xml">
     </Reference>
-    <Reference Include="xunit, Version=1.9.0.1566, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
+    <Reference Include="xunit, Version=1.9.1.1600, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\xunit.1.9.0.1566\lib\xunit.dll</HintPath>
+      <HintPath>..\packages\xunit.1.9.1\lib\net20\xunit.dll</HintPath>
     </Reference>
-    <Reference Include="xunit.extensions, Version=1.9.0.1566, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
+    <Reference Include="xunit.extensions, Version=1.9.1.1600, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\xunit.extensions.1.9.0.1566\lib\xunit.extensions.dll</HintPath>
+      <HintPath>..\packages\xunit.extensions.1.9.1\lib\net20\xunit.extensions.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
@@ -124,10 +124,12 @@
     <Compile Include="Fakes\FakeRouteResolver.cs" />
     <Compile Include="Fakes\FakeObjectSerializer.cs" />
     <Compile Include="Fakes\FakeHookedModule.cs" />
+    <Compile Include="Fakes\FakeUserIdentity.cs" />
     <Compile Include="Fakes\FakeViewEngineHost.cs" />
     <Compile Include="Fakes\MockPipelines.cs" />
     <Compile Include="Fakes\Person.cs" />
     <Compile Include="Fakes\ViewModel.cs" />
+    <Compile Include="Helpers\CacheHelpersFixture.cs" />
     <Compile Include="Unit\Bootstrapper\CollectionTypeRegistrationFixture.cs" />
     <Compile Include="Unit\Bootstrapper\InstanceRegistrationFixture.cs" />
     <Compile Include="Unit\Bootstrapper\PipelinesFixture.cs" />
@@ -172,7 +174,6 @@
     <Compile Include="Specifications\Handling a POST request.cs" />
     <Compile Include="Specifications\Handling a PUT request.cs" />
     <Compile Include="Specifications\RequestSpec.cs" />
-    <Compile Include="Unit\Bootstrapper\DefaultModuleKeyGeneratorFixture.cs" />
     <Compile Include="Unit\Bootstrapper\NancyBootstrapperBaseFixture.cs" />
     <Compile Include="Unit\DefaultNancyBootstrapperBootstrapperBaseFixture.cs" />
     <Compile Include="Unit\DynamicDictionaryValueFixture.cs" />
@@ -193,7 +194,6 @@
     <Compile Include="Unit\AfterPipelineFixture.cs" />
     <Compile Include="Unit\BeforePipelineFixture.cs" />
     <Compile Include="Unit\RequestFixture.cs" />
-    <Compile Include="Fakes\FakeModuleKeyGenerator.cs" />
     <Compile Include="Fakes\FakeModuleCatalog.cs" />
     <Compile Include="Unit\DefaultResponseFormatterFixture.cs" />
     <Compile Include="Unit\RequestHeadersFixture.cs" />
@@ -219,9 +219,10 @@
     <Compile Include="Unit\Routing\RouteFixture.cs" />
     <Compile Include="Unit\DynamicDictionaryFixture.cs" />
     <Compile Include="Unit\Routing\DefaultRouteResolverFixture.cs" />
-    <Compile Include="Unit\Security\CsrfStartupFixture.cs" />
+    <Compile Include="Unit\Security\CsrfFixture.cs" />
     <Compile Include="Unit\Security\DefaultCsrfTokenValidatorFixture.cs" />
     <Compile Include="Unit\Security\ModuleSecurityFixture.cs" />
+    <Compile Include="Unit\Security\UserIdentityExtensionsFixture.cs" />
     <Compile Include="Unit\Sessions\CookieBasedSessionsFixture.cs" />
     <Compile Include="Unit\Cryptography\RijndaelEncryptionProviderFixture.cs" />
     <Compile Include="Unit\Sessions\DefaultSessionObjectFormatterFixture.cs" />

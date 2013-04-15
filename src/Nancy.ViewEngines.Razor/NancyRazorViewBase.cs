@@ -162,6 +162,19 @@
 
         public virtual void WriteAttribute(string name, Tuple<string, int> prefix, Tuple<string, int> suffix, params AttributeValue[] values)
         {
+            var attributeValue = this.BuildAttribute(name, prefix, suffix, values);
+            this.WriteLiteral(attributeValue);
+        }
+
+        public virtual void WriteAttributeTo(TextWriter writer, string name, Tuple<string, int> prefix, Tuple<string, int> suffix, params AttributeValue[] values)
+        {
+            var attributeValue = this.BuildAttribute(name, prefix, suffix, values);
+            this.WriteLiteralTo(writer, attributeValue);
+        }
+
+        private string BuildAttribute(string name, Tuple<string, int> prefix, Tuple<string, int> suffix,
+                                      params AttributeValue[] values)
+        {
             var writtenAttribute = false;
             var attributeBuilder = new StringBuilder(prefix.Item1);
 
@@ -188,8 +201,10 @@
 
             if (renderAttribute)
             {
-                this.WriteLiteral(attributeBuilder);
+                return attributeBuilder.ToString();
             }
+
+            return string.Empty;
         }
 
         private string GetStringValue(AttributeValue value)
@@ -197,6 +212,17 @@
             if (value.IsLiteral)
             {
                 return (string)value.Value.Item1;
+            }
+
+            if (value.Value.Item1 is IHtmlString)
+            {
+                return ((IHtmlString)value.Value.Item1).ToHtmlString();
+            }
+
+            if (value.Value.Item1 is DynamicDictionaryValue)
+            {
+                var dynamicValue = (DynamicDictionaryValue)value.Value.Item1;
+                return dynamicValue.HasValue ? dynamicValue.Value.ToString() : string.Empty;
             }
 
             return value.Value.Item1.ToString();

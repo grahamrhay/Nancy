@@ -134,16 +134,18 @@
 
             var razorResult = engine.GenerateCode(reader, null, null, "roo");
 
-            var viewFactory = this.GenerateRazorViewFactory(renderer.Provider, razorResult, referencingAssembly, renderer.Assemblies, passedModelType, viewLocationResult);
+            var viewFactory = this.GenerateRazorViewFactory(renderer, razorResult, referencingAssembly, passedModelType, viewLocationResult);
 
             return viewFactory;
         }
 
-        private Func<INancyRazorView> GenerateRazorViewFactory(CodeDomProvider codeProvider, GeneratorResults razorResult, Assembly referencingAssembly, IEnumerable<string> rendererSpecificAssemblies, Type passedModelType, ViewLocationResult viewLocationResult)
+        private Func<INancyRazorView> GenerateRazorViewFactory(IRazorViewRenderer viewRenderer, GeneratorResults razorResult, Assembly referencingAssembly, Type passedModelType, ViewLocationResult viewLocationResult)
         {
-            var outputAssemblyName = Path.Combine(Path.GetTempPath(), String.Format("Temp_{0}.dll", Guid.NewGuid().ToString("N")));
+            var outputAssemblyName = 
+                Path.Combine(Path.GetTempPath(), String.Format("Temp_{0}.dll", Guid.NewGuid().ToString("N")));
 
-            var modelType = FindModelType(razorResult.Document, passedModelType);
+            var modelType = 
+                FindModelType(razorResult.Document, passedModelType, viewRenderer.ModelCodeGenerator);
 
             var assemblies = new List<string>
             {
@@ -153,15 +155,13 @@
                 GetAssemblyPath(modelType)
             };
 
+            assemblies.AddRange(AppDomainAssemblyTypeScanner.Assemblies.Select(GetAssemblyPath));
+
             if (referencingAssembly != null)
             {
                 assemblies.Add(GetAssemblyPath(referencingAssembly));
             }
-
-            assemblies = assemblies
-                .Union(rendererSpecificAssemblies)
-                .ToList();
-
+            
             if (this.razorConfiguration != null)
             {
                 var assemblyNames = this.razorConfiguration.GetAssemblyNames();
@@ -176,12 +176,17 @@
                 }
             }
 
-            var compilerParameters = new CompilerParameters(assemblies.ToArray(), outputAssemblyName);
+            assemblies = assemblies
+                .Union(viewRenderer.Assemblies)
+                .ToList();
+
+            var compilerParameters = 
+                new CompilerParameters(assemblies.ToArray(), outputAssemblyName);
 
             CompilerResults results;
             lock (this.compileLock)
             {
-                results = codeProvider.CompileAssemblyFromDom(compilerParameters, razorResult.GeneratedCode);
+                results = viewRenderer.Provider.CompileAssemblyFromDom(compilerParameters, razorResult.GeneratedCode);
             }
 
             if (results.Errors.HasErrors)
@@ -244,7 +249,7 @@
             foreach (var compilerError in errors)
             {
                 var lineIndex = compilerError.Line - 1;
-                if (lineIndex <= templateLines.Count - 1)
+                if ((lineIndex <= templateLines.Count - 1) && (lineIndex >= 0))
                 {
                     templateLines[lineIndex] = string.Format("<span class='error'><a name='{0}' />{1}</span>", compilerError.Line, templateLines[lineIndex]);
                 }
@@ -273,11 +278,12 @@
         /// </summary>
         /// <param name="block">The document</param>
         /// <param name="passedModelType">The model type from the base class</param>
+        /// <param name="modelCodeGenerator">The model code generator</param>
         /// <returns>The model type, if discovered, or the passedModelType if not</returns>
-        private static Type FindModelType(Block block, Type passedModelType)
+        private static Type FindModelType(Block block, Type passedModelType, Type modelCodeGenerator)
         {
             var modelBlock =
-                block.Flatten().FirstOrDefault(b => b.CodeGenerator.GetType() == typeof(CSharpModelCodeGenerator));
+                block.Flatten().FirstOrDefault(b => b.CodeGenerator.GetType() == modelCodeGenerator);
 
             if (modelBlock == null)
             {
@@ -312,7 +318,41 @@
                 return modelType;
             }
 
-            throw new NotSupportedException(string.Format("Unable to discover CLR Type for model by the name of {0}. Try using a fully qualified type name and ensure that the assembly is added to the configuration file.", discoveredModelType));
+            throw new NotSupportedException(string.Format(
+                                                "Unable to discover CLR Type for model by the name of {0}.\n\nTry using a fully qualified type name and ensure that the assembly is added to the configuration file.\n\nAppDomain Assemblies:\n\t{1}.\n\nCurrent ADATS assemblies:\n\t{2}.\n\nAssemblies in directories\n\t{3}", 
+                                                discoveredModelType,
+                                                AppDomain.CurrentDomain.GetAssemblies().Select(a => a.FullName).Aggregate((n1, n2) => n1 + "\n\t" + n2),
+                                                AppDomainAssemblyTypeScanner.Assemblies.Select(a => a.FullName).Aggregate((n1, n2) => n1 + "\n\t" + n2),
+                                                GetAssembliesInDirectories().Aggregate((n1, n2) => n1 + "\n\t" + n2)));
+        }
+
+        private static IEnumerable<String> GetAssembliesInDirectories()
+        {
+            return GetAssemblyDirectories().SelectMany(d => Directory.GetFiles(d, "*.dll"));
+        }
+
+        /// <summary>
+        /// Returns the directories containing dll files. It uses the default convention as stated by microsoft.
+        /// </summary>
+        /// <see cref="http://msdn.microsoft.com/en-us/library/system.appdomainsetup.privatebinpathprobe.aspx"/>
+        private static IEnumerable<string> GetAssemblyDirectories()
+        {
+            var privateBinPathDirectories = AppDomain.CurrentDomain.SetupInformation.PrivateBinPath == null
+                                                ? new string[] { }
+                                                : AppDomain.CurrentDomain.SetupInformation.PrivateBinPath.Split(';');
+
+            foreach (var privateBinPathDirectory in privateBinPathDirectories)
+            {
+                if (!string.IsNullOrWhiteSpace(privateBinPathDirectory))
+                {
+                    yield return privateBinPathDirectory;
+                }
+            }
+
+            if (AppDomain.CurrentDomain.SetupInformation.PrivateBinPathProbe == null)
+            {
+                yield return AppDomain.CurrentDomain.SetupInformation.ApplicationBase;
+            }
         }
 
         private static void AddModelNamespace(GeneratorResults razorResult, Type modelType)
