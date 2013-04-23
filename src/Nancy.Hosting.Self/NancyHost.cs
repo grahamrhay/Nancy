@@ -126,7 +126,7 @@
                 return;
             }
 
-            if (!this.configuration.CreateNamespaceReservations)
+            if (!this.configuration.NamespaceReservationsConfiguration.CreateReservations)
             {
                 throw new UnableToCreateNamespaceReservationsException(this.GetPrefixes(), GetUser());
             }
@@ -184,8 +184,12 @@
             return true;
         }
 
-        private static string GetUser()
+        private string GetUser()
         {
+            if (!string.IsNullOrWhiteSpace(this.configuration.NamespaceReservationsConfiguration.User))
+            {
+                return this.configuration.NamespaceReservationsConfiguration.User;
+            }
             return WindowsIdentity.GetCurrent().Name;
         }
 
